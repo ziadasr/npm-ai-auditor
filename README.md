@@ -158,11 +158,17 @@ Score Ranges (Higher Score = More Dangerous):
   🟠 50-79:   HIGH RISK      - Careful consideration required
   🔴 80-100:  CRITICAL RISK  - Not recommended
 
-Calculation Factors:
-  • CVE Severity & Count (CRITICAL: +35 pts, HIGH: +15 pts, MEDIUM: +5 pts)
-  • Maintainers count & activity (0: +25 pts, 1: +15 pts, 5+: -10 pts)
-  • Download popularity (inverse - 100M+: -15 pts, <50: +18 pts)
-  • Install scripts: postinstall (+20), preinstall (+12), install (+8)
+Calculation Method (Multiplicative with Logarithmic Smoothing):
+  Risk = log₂(multiplier) × 20 + 10
+
+  Multiplier Weights by Factor:
+  • Scripts: postinstall (×2.2), preinstall (×1.6), install (×1.3)
+  • Maintainers: 0 (×2.8), 1 (×1.9), 2 (×1.35), 3+ (×0.82), 5+ (×0.65)
+  • Package Age: <7 days (×1.45), >2 years (×1.7), >1 year (×1.35)
+  • Downloads: <50 (×2.1), <500 (×1.7), <10k (×1.25), >100M (×0.45)
+  • Transparency: no publisher (×1.18), no repo (×1.25), no description (×1.12)
+
+  CVE severity scoring is handled separately in the audit route
 
 🔐 KNOWN VULNERABILITIES (CVEs)
 ──────────────────────────────────────────────────────────────────────

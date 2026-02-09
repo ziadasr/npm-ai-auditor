@@ -1,120 +1,107 @@
-/**
- * Analyze package metadata and calculate industry-standard risk score
- * Risk Scale: 0-100 (Higher = More Dangerous)
- *   0-19:   LOW RISK (safe)
- *   20-49:  MEDIUM RISK (review before using)
- *   50-79:  HIGH RISK (careful consideration required)
- *   80-100: CRITICAL RISK (not recommended)
- */
 async function analyzeMetadata(pkgData) {
-  let riskScore = 0; // Start at 0 (safest)
   let reasons = [];
+  let riskMultiplier = 1.0;
 
-  // ================================================
-  // RISK FACTORS (Increase Score)
-  // ================================================
-
-  // 1. CVE SEVERITY (Not present in metadata, handled separately)
-  // Note: CVE count and severity are evaluated in auditPackage()
-
-  // 2. MALICIOUS SCRIPTS - Postinstall scripts are common malware vectors
+  let scriptFactor = 1.0;
   if (pkgData.scripts?.postinstall) {
-    riskScore += 20; // Major risk factor
+    scriptFactor *= 2.2;
     reasons.push("Suspicious postinstall script detected");
   }
   if (pkgData.scripts?.preinstall) {
-    riskScore += 12;
+    scriptFactor *= 1.6;
     reasons.push("Preinstall script detected");
   }
   if (pkgData.scripts?.install) {
-    riskScore += 8;
+    scriptFactor *= 1.3;
     reasons.push("Install script detected");
   }
+  riskMultiplier *= scriptFactor;
 
-  // 3. MAINTAINER & ACTIVITY ANALYSIS
   const maintainers = Array.isArray(pkgData.maintainers)
     ? pkgData.maintainers.length
     : 0;
 
   if (maintainers === 0) {
-    riskScore += 25; // No maintainers = abandoned package
+    riskMultiplier *= 2.8;
     reasons.push("No active maintainers");
   } else if (maintainers === 1) {
-    riskScore += 15; // Single point of failure
+    riskMultiplier *= 1.9;
     reasons.push("Single maintainer (single point of failure)");
   } else if (maintainers === 2) {
-    riskScore += 8; // Two maintainers still lacks redundancy
+    riskMultiplier *= 1.35;
     reasons.push("Limited maintainer team");
   } else if (maintainers >= 5) {
-    riskScore -= 10; // Multiple maintainers significantly reduces risk
+    riskMultiplier *= 0.65;
     reasons.push("Well-maintained package (multiple maintainers)");
   } else if (maintainers >= 3) {
-    riskScore -= 5; // Moderate team
+    riskMultiplier *= 0.82;
     reasons.push("Moderate maintainer team");
   }
 
-  // 4. PUBLISH & ACTIVITY - Recent versions and stale packages are both risks
   const latestVersion = pkgData.time?.[pkgData.version];
   if (latestVersion) {
     const daysOld =
       (Date.now() - new Date(latestVersion)) / (1000 * 60 * 60 * 24);
     if (daysOld < 7) {
-      riskScore += 12; // Recently published - supply chain risk
+      riskMultiplier *= 1.45;
       reasons.push("Published <7 days ago (supply chain risk)");
     } else if (daysOld > 730) {
-      riskScore += 25; // Over 2 years without updates
+      riskMultiplier *= 1.7;
       reasons.push("Not updated for 2+ years (stale)");
     } else if (daysOld > 365) {
-      riskScore += 18; // Over 1 year without updates
+      riskMultiplier *= 1.35;
       reasons.push("Not updated for 1+ years");
     }
   }
 
-  // 5. DOWNLOADS/POPULARITY - Inverse relationship with risk
   const downloads = pkgData.downloads || 0;
+  let downloadFactor = 1.0;
 
   if (downloads < 50) {
-    riskScore += 18; // Essentially untested
+    downloadFactor = 2.1;
     reasons.push("Extremely low download count (<50)");
   } else if (downloads < 500) {
-    riskScore += 12; // Minimal validation
+    downloadFactor = 1.7;
     reasons.push("Very low download count");
   } else if (downloads < 10_000) {
-    riskScore += 6; // Low adoption
+    downloadFactor = 1.25;
     reasons.push("Low download count");
   } else if (downloads > 100_000_000) {
-    riskScore -= 15; // Massive adoption = heavily audited
+    downloadFactor = 0.45;
     reasons.push("Massive adoption (100M+ downloads)");
   } else if (downloads > 10_000_000) {
-    riskScore -= 12; // Very high adoption
+    downloadFactor = 0.55;
     reasons.push("Very high adoption (10M+ downloads)");
   } else if (downloads > 1_000_000) {
-    riskScore -= 8; // High adoption
+    downloadFactor = 0.72;
     reasons.push("High adoption (1M+ downloads)");
   } else if (downloads > 100_000) {
-    riskScore -= 4; // Moderate adoption
+    downloadFactor = 0.88;
     reasons.push("Moderate adoption (100K+ downloads)");
   }
+  riskMultiplier *= downloadFactor;
 
-  // 6. TRANSPARENCY & DOCUMENTATION
   if (!pkgData.publisher) {
-    riskScore += 4;
+    riskMultiplier *= 1.18;
     reasons.push("No publisher information");
   }
 
   if (!pkgData.repository) {
-    riskScore += 6;
+    riskMultiplier *= 1.25;
     reasons.push("No repository link");
   }
 
   if (!pkgData.description) {
-    riskScore += 3;
+    riskMultiplier *= 1.12;
     reasons.push("No package description");
   }
 
-  // ================================================
-  // DETERMINE RISK LABEL & METER
-  // ================================================
+  const riskScore = Math.round(
+    Math.min(
+      100,
+      Math.max(0, Math.log2(Math.max(1, riskMultiplier)) * 20 + 10),
+    ),
+  );
 
   const getRiskLabel = (score) => {
     if (score >= 80) return "CRITICAL RISK";
@@ -124,32 +111,28 @@ async function analyzeMetadata(pkgData) {
   };
 
   const getRiskEmoji = (score) => {
-    if (score >= 80) return "🔴"; // Critical - Red
-    if (score >= 50) return "🟠"; // High - Orange
-    if (score >= 20) return "🟡"; // Medium - Yellow
-    return "🟢"; // Low - Green
+    if (score >= 80) return "🔴";
+    if (score >= 50) return "🟠";
+    if (score >= 20) return "🟡";
+    return "🟢";
   };
-
-  // Clamp final score to 0-100 range
-  riskScore = Math.max(0, Math.min(100, riskScore));
 
   const riskLabel = getRiskLabel(riskScore);
   const emoji = getRiskEmoji(riskScore);
   const status = `${emoji} ${riskLabel}`;
 
-  // Generate risk meter visualization (20 characters)
   const meterLength = 20;
   const filledLength = Math.round((riskScore / 100) * meterLength);
   const riskMeter =
     "█".repeat(filledLength) + "░".repeat(meterLength - filledLength);
 
   return {
-    riskScore, // 0-100 numeric score
-    riskLabel, // Textual label
-    status, // Emoji + Label
-    riskMeter, // Visual representation [████████░░░░░░░░░░]
+    riskScore,
+    riskLabel,
+    status,
+    riskMeter,
     reasons,
-    trustScore: Math.max(0, 100 - riskScore), // Inverse score (100 = fully trustworthy)
+    trustScore: Math.max(0, 100 - riskScore),
     analysis: `${pkgData.name}: ${status} (${riskScore}/100)`,
   };
 }
