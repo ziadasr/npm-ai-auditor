@@ -14,7 +14,7 @@ async function checkCVEs(pkg, version) {
     if (process.env.GITHUB_TOKEN) {
       headers.Authorization = `token ${process.env.GITHUB_TOKEN}`;
       console.log(`   🔐 Using GitHub token for authentication`);
-      console.log("token:", process.env.GITHUB_TOKEN);
+      //console.log("token:", process.env.GITHUB_TOKEN);
     }
 
     // PARALLEL: GitHub + NEW OSV.dev

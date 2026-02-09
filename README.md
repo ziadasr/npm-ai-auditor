@@ -63,11 +63,12 @@ Analyzes npm packages using:
 
 - **CVE Detection** - GitHub Advisories + OSV.dev (Google's vulnerability database)
 - **AI Reasoning** - Groq Llama 3.3-70B language model
-- **Risk Scoring** - Package metadata + vulnerability analysis
-- **Exploit Scenarios** - LLM-generated attack paths
-- **Install Script Analysis** - Detects suspicious hooks
+- **Risk Scoring** - Industry-standard 0-100 scale with weighted factors
+- **Exploit Scenarios** - LLM-generated contextual attack paths
+- **Install Script Analysis** - Detects suspicious postinstall/preinstall hooks
+- **Maintainer Risk Assessment** - Single-point-of-failure detection
 
-Example: Audit `lodash@4.17.15` → Finds prototype pollution CVE → AI determines if version affected → Explains realistic exploit → Suggests upgrade.
+Example: Audit `lodash@4.17.15` → Finds 4 CVEs (2 HIGH severity) → Scores 43/100 (MEDIUM RISK) due to high adoption (102M+ downloads) offsetting vulnerabilities → AI explains ReDoS/Command Injection attack vectors → Recommends upgrade to ≥4.17.21.
 
 ---
 
@@ -133,38 +134,38 @@ When you make a request, the server terminal displays a formatted analysis:
 
 ```
 🔍 AI SECURITY ANALYSIS: lodash@4.17.15
-══════════════════════════════════════════════════════════════════
+══════════════════════════════════════════════════════════════════════
 
 📝 SUMMARY
-──────────────────────────────────────────────────────────────────
+──────────────────────────────────────────────────────────────────────
 The lodash@4.17.15 package has several known vulnerabilities, including
 Regular Expression Denial of Service (ReDoS), Command Injection, and
-Prototype Pollution, which can be exploited by an attacker to cause a
-denial of service or execute arbitrary code.
+Prototype Pollution, which can be exploited to cause denial of service
+or execute arbitrary code.
 
 ⚠️  RISK ASSESSMENT
-──────────────────────────────────────────────────────────────────
-Risk Level:       🔴 CRITICAL RISK
-Risk Score:       0/100
-Risk Meter:       [░░░░░░░░░░░░░░░░░░░░]
+──────────────────────────────────────────────────────────────────────
+Risk Level:       🟡 MEDIUM RISK
+Risk Score:       43/100
+Risk Meter:       [█████████░░░░░░░░░░░]
 Version Affected: ❌ YES
 
 📋 RISK CRITERIA
-──────────────────────────────────────────────────────────────────
-Score Ranges:
-  🟢 80-100:  LOW RISK       - Safe to use
-  🟡 50-79:   MEDIUM RISK    - Review before using
-  🟠 20-49:   HIGH RISK      - Careful consideration required
-  🔴 0-19:    CRITICAL RISK  - Not recommended
+──────────────────────────────────────────────────────────────────────
+Score Ranges (Higher Score = More Dangerous):
+  🟢 0-19:    LOW RISK       - Safe to use
+  🟡 20-49:   MEDIUM RISK    - Review before using
+  🟠 50-79:   HIGH RISK      - Careful consideration required
+  🔴 80-100:  CRITICAL RISK  - Not recommended
 
 Calculation Factors:
-  • Known CVEs (highest impact - 30 points per CVE)
-  • Maintainers count and activity
-  • Download popularity
-  • Install scripts (preinstall/postinstall checks)
+  • CVE Severity & Count (CRITICAL: +35 pts, HIGH: +15 pts, MEDIUM: +5 pts)
+  • Maintainers count & activity (0: +25 pts, 1: +15 pts, 5+: -10 pts)
+  • Download popularity (inverse - 100M+: -15 pts, <50: +18 pts)
+  • Install scripts: postinstall (+20), preinstall (+12), install (+8)
 
 🔐 KNOWN VULNERABILITIES (CVEs)
-──────────────────────────────────────────────────────────────────
+──────────────────────────────────────────────────────────────────────
 • GHSA-29mw-wpgm-hmr9 [🟢 MODERATE]
   Regular Expression Denial of Service (ReDoS) in lodash
 • GHSA-35jh-r3h4-6jhm [🟠 HIGH]
@@ -172,10 +173,10 @@ Calculation Factors:
 • GHSA-p6mc-m468-83gw [🟠 HIGH]
   Prototype Pollution in lodash
 • GHSA-xxjr-mmjv-4gpg [🟢 MODERATE]
-  Lodash has Prototype Pollution Vulnerability in `_.unset` and `_.omit`
+  Lodash has Prototype Pollution Vulnerability in `_.unset` and `_.omit` functions
 
 📊 PACKAGE METADATA
-──────────────────────────────────────────────────────────────────
+──────────────────────────────────────────────────────────────────────
 Downloads:   102,575,328
 Publisher:   jdalton
 License:     MIT
@@ -186,27 +187,26 @@ Scripts:
   test: echo "See https://travis-ci.org/lodash-archive/lodash-cli for testing details."
 
 🛠️  SCRIPT SAFETY
-──────────────────────────────────────────────────────────────────
+──────────────────────────────────────────────────────────────────────
 Suspicious Scripts: ✅ NO
-The install scripts are null, indicating no suspicious behavior.
+The install scripts are null, indicating no custom scripts are run during
+installation, reducing the risk of suspicious behavior.
 
 ⚡ EXPLOIT SCENARIO
-──────────────────────────────────────────────────────────────────
-An attacker could exploit the ReDoS vulnerability by crafting a
-malicious input to the `toNumber`, `trim`, or `trimEnd` functions,
-causing the application to become unresponsive or crash. Alternatively,
-an attacker could exploit the Command Injection vulnerability by
-injecting malicious code into the template function, allowing them to
-execute arbitrary system commands.
+──────────────────────────────────────────────────────────────────────
+An attacker could exploit the ReDoS vulnerability by crafting a malicious
+input to the `toNumber`, `trim`, or `trimEnd` functions, causing the
+application to hang or crash. Alternatively, an attacker could exploit
+the Command Injection vulnerability by injecting malicious commands via
+the template function, potentially leading to arbitrary code execution.
 
 💡 RECOMMENDATIONS
-──────────────────────────────────────────────────────────────────
-1. Update the lodash package to a version greater than or equal to
-   4.17.21 to fix the known vulnerabilities.
-2. Implement input validation and sanitization to prevent malicious
-   inputs from reaching the vulnerable functions.
-3. Monitor the application for signs of exploitation, such as unusual
-   system calls or crashes.
+──────────────────────────────────────────────────────────────────────
+1. Update to the latest version of lodash (>= 4.17.21) to fix the known
+   vulnerabilities.
+2. Implement input validation and sanitization to prevent malicious inputs
+   from reaching the vulnerable functions.
+3. Monitor application logs for signs of exploitation attempts.
 
 ══════════════════════════════════════════════════════════════════
 ```
@@ -221,10 +221,10 @@ The API also returns structured JSON for programmatic use:
   "timestamp": "2026-02-09T22:30:00.000Z",
   "package": "lodash",
   "version": "4.17.15",
-  "riskScore": 0,
-  "riskStatus": "🔴 CRITICAL RISK",
-  "trustScore": 0,
-  "analysis": "🔴 CRITICAL RISK (0/100)",
+  "riskScore": 43,
+  "riskStatus": "🟡 MEDIUM RISK",
+  "trustScore": 57,
+  "analysis": "🟡 MEDIUM RISK (43/100)",
   "cveCount": 4,
   "cves": [
     {
@@ -263,17 +263,17 @@ The API also returns structured JSON for programmatic use:
     }
   },
   "aiAnalysis": {
-    "summary": "The lodash@4.17.15 package has several known vulnerabilities, including Regular Expression Denial of Service (ReDoS), Command Injection, and Prototype Pollution, which can be exploited by an attacker to cause a denial of service or execute arbitrary code.",
+    "summary": "The lodash@4.17.15 package has several known vulnerabilities, including Regular Expression Denial of Service (ReDoS), Command Injection, and Prototype Pollution, which can be exploited to cause denial of service or execute arbitrary code.",
     "isVersionLikelyAffected": true,
     "scriptRisk": {
       "suspicious": false,
-      "reason": "The install scripts are null, indicating no suspicious behavior."
+      "reason": "The install scripts are null, indicating no custom scripts are run during installation, reducing the risk of suspicious behavior."
     },
-    "exploitScenario": "An attacker could exploit the ReDoS vulnerability by crafting a malicious input to the `toNumber`, `trim`, or `trimEnd` functions, causing the application to become unresponsive or crash. Alternatively, an attacker could exploit the Command Injection vulnerability by injecting malicious code into the template function, allowing them to execute arbitrary system commands.",
+    "exploitScenario": "An attacker could exploit the ReDoS vulnerability by crafting a malicious input to the `toNumber`, `trim`, or `trimEnd` functions, causing the application to hang or crash. Alternatively, an attacker could exploit the Command Injection vulnerability by injecting malicious commands via the template function, potentially leading to arbitrary code execution.",
     "recommendations": [
-      "Update the lodash package to a version greater than or equal to 4.17.21 to fix the known vulnerabilities.",
+      "Update to the latest version of lodash (>= 4.17.21) to fix the known vulnerabilities.",
       "Implement input validation and sanitization to prevent malicious inputs from reaching the vulnerable functions.",
-      "Monitor the application for signs of exploitation, such as unusual system calls or crashes."
+      "Monitor application logs for signs of exploitation attempts."
     ],
     "contextualRisk": "CRITICAL"
   },

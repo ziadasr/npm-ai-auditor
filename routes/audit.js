@@ -5,50 +5,149 @@ const { analyzeSecurityContext } = require("../services/aiService");
 const router = express.Router();
 
 /* =========================
-   Risk Calculation
+   Risk Calculation (Industry Standard)
+   Higher Score = More Dangerous (0-100)
 ========================= */
 
+/**
+ * Calculate comprehensive risk score based on CVE severity, maintainers,
+ * downloads popularity, and install scripts
+ *
+ * Score Ranges:
+ *   0-19:   LOW RISK      (safe)
+ *   20-49:  MEDIUM RISK   (review before using)
+ *   50-79:  HIGH RISK     (careful consideration required)
+ *   80-100: CRITICAL RISK (not recommended)
+ */
 const calculateRiskScore = (result) => {
-  let score = 100; // start at maximum trust
-
+  let score = 0;
   const cveCount = result.cveCount || 0;
+  const cves = result.cves || [];
   const metadata = result.metadata || {};
 
-  // 🔴 CVE penalty - strongest factor
-  score -= cveCount * 30;
+  // ================================================
+  // 1. CVE SEVERITY (Highest Impact Factor)
+  // ================================================
+  let criticalCount = 0;
+  let highCount = 0;
 
-  // ⚠️ Risk signals (minor)
-  if (!metadata.publisher) score -= 5; // publisher missing → minor risk
-  if ((metadata.downloads || 0) < 1000) score -= 10; // very unpopular package → small penalty
-  if (metadata.scripts?.postinstall) score -= 15; // dangerous postinstall script
+  cves.forEach((cve) => {
+    const severity = cve.severity ? cve.severity.toUpperCase() : "";
+    if (severity === "CRITICAL") {
+      criticalCount++;
+      score += 35; // Each CRITICAL CVE immediately increases risk substantially
+    } else if (severity === "HIGH") {
+      highCount++;
+      score += 15; // HIGH severity has significant impact
+    } else if (severity === "MEDIUM") {
+      score += 5; // MEDIUM severity has minor contribution
+    } else if (cveCount > 0) {
+      score += 8; // Unknown severity still counted
+    }
+  });
 
-  // 🟢 Trust signals (major)
-  const downloads = metadata.downloads || 0;
-  if (downloads > 1_000_000) score += 10; // popular package bonus
-  if (downloads > 10_000_000) score += 10; // super popular package bonus
-
+  // ================================================
+  // 2. MAINTAINER COUNT & ACTIVITY (Single Point of Failure)
+  // ================================================
   const maintainers = Array.isArray(metadata.maintainers)
     ? metadata.maintainers.length
     : Number(metadata.maintainers || 0);
 
-  if (maintainers > 5) score += 5; // well-supported package
+  if (maintainers === 0) {
+    score += 25; // No maintainers = abandoned package risk
+  } else if (maintainers === 1) {
+    score += 15; // Single maintainer = significant bottleneck risk
+  } else if (maintainers === 2) {
+    score += 8; // Two maintainers still lacks redundancy
+  } else if (maintainers >= 5) {
+    score -= 10; // Multiple maintainers = strong risk reduction
+  } else if (maintainers >= 3) {
+    score -= 5; // Moderate team = some risk reduction
+  }
 
-  // clamp between 0 and 100
+  // ================================================
+  // 3. DOWNLOADS/POPULARITY (Inverse Risk)
+  // ================================================
+  const downloads = metadata.downloads || 0;
+
+  if (downloads < 50) {
+    score += 18; // Essentially untested package
+  } else if (downloads < 500) {
+    score += 12; // Minimal community validation
+  } else if (downloads < 10_000) {
+    score += 6; // Low adoption
+  } else if (downloads > 100_000_000) {
+    score -= 15; // Massive adoption = heavily audited
+  } else if (downloads > 10_000_000) {
+    score -= 12; // Very high adoption
+  } else if (downloads > 1_000_000) {
+    score -= 8; // High adoption
+  } else if (downloads > 100_000) {
+    score -= 4; // Moderate adoption
+  }
+
+  // ================================================
+  // 4. INSTALL SCRIPTS (Common Malware Vector)
+  // ================================================
+  if (metadata.scripts?.postinstall) {
+    score += 20; // Major risk: postinstall can run arbitrary code
+  }
+  if (metadata.scripts?.preinstall) {
+    score += 12; // Preinstall scripts are also risky
+  }
+  if (metadata.scripts?.install) {
+    score += 8; // Install scripts add some risk
+  }
+
+  // ================================================
+  // 5. PACKAGE AGE & UPDATE FREQUENCY
+  // ================================================
+  const latestVersion = metadata.time?.[metadata.version];
+  if (latestVersion) {
+    const daysOld =
+      (Date.now() - new Date(latestVersion)) / (1000 * 60 * 60 * 24);
+    if (daysOld < 7) {
+      score += 12; // Recently published (potential account takeover)
+    } else if (daysOld > 365) {
+      score += 18; // Over 1 year without updates
+    } else if (daysOld > 730) {
+      score += 25; // Over 2 years without updates
+    }
+  }
+
+  // ================================================
+  // 6. TRANSPARENCY & DOCUMENTATION
+  // ================================================
+  if (!metadata.publisher) {
+    score += 4; // Missing publisher info
+  }
+
+  if (!metadata.repository) {
+    score += 6; // No repository link = reduced transparency
+  }
+
+  // Clamp final score to 0-100 range
   return Math.max(0, Math.min(100, score));
 };
 
+/**
+ * Get risk status label from numeric score
+ */
 const getRiskStatus = (score) => {
-  if (score >= 80) return "LOW RISK";
-  if (score >= 50) return "MEDIUM RISK";
-  if (score >= 20) return "HIGH RISK";
-  return "CRITICAL RISK";
+  if (score >= 80) return "CRITICAL RISK";
+  if (score >= 50) return "HIGH RISK";
+  if (score >= 20) return "MEDIUM RISK";
+  return "LOW RISK";
 };
 
+/**
+ * Get emoji indicator for risk level
+ */
 const getRiskEmoji = (score) => {
-  if (score >= 80) return "🟢";
-  if (score >= 50) return "🟡";
-  if (score >= 20) return "🟠";
-  return "🔴";
+  if (score >= 80) return "🔴"; // Critical - Red
+  if (score >= 50) return "🟠"; // High - Orange
+  if (score >= 20) return "🟡"; // Medium - Yellow
+  return "🟢"; // Low - Green
 };
 
 /* =========================
@@ -63,24 +162,24 @@ const formatAIAnalysisForConsole = (
   cves = [],
   metadata = {},
 ) => {
-  // Derive risk status from score
+  // Derive risk status from score (Higher = More Dangerous)
   let riskColor = "";
   let riskStatus = "";
   if (score >= 80) {
-    riskStatus = "LOW RISK";
-    riskColor = "🟢";
-  } else if (score >= 50) {
-    riskStatus = "MEDIUM RISK";
-    riskColor = "🟡";
-  } else if (score >= 20) {
-    riskStatus = "HIGH RISK";
-    riskColor = "🟠";
-  } else {
     riskStatus = "CRITICAL RISK";
     riskColor = "🔴";
+  } else if (score >= 50) {
+    riskStatus = "HIGH RISK";
+    riskColor = "🟠";
+  } else if (score >= 20) {
+    riskStatus = "MEDIUM RISK";
+    riskColor = "🟡";
+  } else {
+    riskStatus = "LOW RISK";
+    riskColor = "🟢";
   }
 
-  // Risk meter visualization
+  // Risk meter visualization (Higher filled = More Risk)
   const meterLength = 20;
   const filledLength = Math.round((score / 100) * meterLength);
   const meter =
@@ -107,16 +206,18 @@ const formatAIAnalysisForConsole = (
   // Risk Criteria Section
   console.log("\n📋 RISK CRITERIA");
   console.log("─".repeat(70));
-  console.log("Score Ranges:");
-  console.log("  🟢 80-100:  LOW RISK       - Safe to use");
-  console.log("  🟡 50-79:   MEDIUM RISK    - Review before using");
-  console.log("  🟠 20-49:   HIGH RISK      - Careful consideration required");
-  console.log("  🔴 0-19:    CRITICAL RISK  - Not recommended");
+  console.log("Score Ranges (Higher Score = More Dangerous):");
+  console.log("  🟢 0-19:    LOW RISK       - Safe to use");
+  console.log("  🟡 20-49:   MEDIUM RISK    - Review before using");
+  console.log("  🟠 50-79:   HIGH RISK      - Careful consideration required");
+  console.log("  🔴 80-100:  CRITICAL RISK  - Not recommended");
   console.log("\nCalculation Factors:");
-  console.log("  • Known CVEs (highest impact - 30 points per CVE)");
-  console.log("  • Maintainers count and activity");
-  console.log("  • Download popularity");
-  console.log("  • Install scripts (preinstall/postinstall checks)");
+  console.log(
+    "  • CVE Severity & Count (12 pts per CVE, +15 for CRITICAL, +8 for HIGH)",
+  );
+  console.log("  • Maintainers count & activity (0 maintainers = +20 pts)");
+  console.log("  • Download popularity (fewer downloads = higher risk)");
+  console.log("  • Install scripts: postinstall (+25), preinstall (+15)");
 
   // CVEs Section
   if (cves && cves.length > 0) {
