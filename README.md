@@ -169,6 +169,7 @@ Calculation Method (Multiplicative with Logarithmic Smoothing):
   • Transparency: no publisher (×1.18), no repo (×1.25), no description (×1.12)
 
   CVE severity scoring is handled separately in the audit route
+  you can freely change the factors or the calculation way to match you from metadataAnalyzer.js
 
 🔐 KNOWN VULNERABILITIES (CVEs)
 ──────────────────────────────────────────────────────────────────────
